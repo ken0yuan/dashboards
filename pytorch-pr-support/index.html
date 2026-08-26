@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233f6fec'/%3E%3Cpath d='M8 20V12l8-5 8 5v8l-8 5Z' fill='none' stroke='white' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='3' fill='white'/%3E%3C/svg%3E">
+  <title>PyTorch Master · NPU 原生支持看板</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img">
+            <path d="M20 5 34 13v14L20 35 6 27V13Z" fill="currentColor" opacity=".16"/>
+            <path d="M12 24V16l8-5 8 5v8l-8 5Z" fill="none" stroke="currentColor" stroke-width="2.2"/>
+            <circle cx="20" cy="20" r="3.4" fill="currentColor"/>
+          </svg>
+        </div>
+        <div>
+          <strong>NPU Compass</strong>
+          <span>Master 跟随中心</span>
+        </div>
+      </div>
+
+      <nav class="nav-list" aria-label="主导航">
+        <button class="nav-item active" type="button" data-view="overview">
+          <span class="nav-icon">⌂</span><span>总览</span>
+        </button>
+        <button class="nav-item" type="button" data-view="all">
+          <span class="nav-icon">≡</span><span>全部 PR</span>
+          <span class="nav-count" id="sidebarPrCount">0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="supported">
+          <span class="nav-icon">✓</span><span>支持 PR</span>
+          <span class="nav-count success" id="sidebarSupportedCount">0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="unsupported">
+          <span class="nav-icon">!</span><span>不支持 PR</span>
+          <span class="nav-count danger" id="sidebarUnsupportedCount">0</span>
+        </button>
+        <button class="nav-item" type="button" data-view="unanalyzed">
+          <span class="nav-icon">◷</span><span>未分析 PR</span>
+          <span class="nav-count warning" id="sidebarUnanalyzedCount">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sync-card">
+          <div class="sync-title"><span class="pulse-dot"></span> 数据已归档</div>
+          <div id="syncTime">等待数据</div>
+          <small id="sourceCount">0 个分析文件</small>
+        </div>
+        <div class="side-caption">PyTorch main → torch-npu</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="page-header">
+        <div>
+          <div class="eyebrow">PYTORCH MASTER FOLLOW-UP</div>
+          <h1 id="pageTitle">原生支持看板</h1>
+          <p id="pageSubtitle">跟踪上游 PR 在 NPU 上的原生支持、适配与验证状态</p>
+        </div>
+        <div class="header-actions">
+          <span class="live-badge"><i></i> Archive Live</span>
+          <button id="resetFilters" class="ghost-button" type="button">重置筛选</button>
+        </div>
+      </header>
+
+      <section class="filter-bar" aria-label="数据筛选">
+        <label class="filter-field date-field">
+          <span>统计区间</span>
+          <div class="date-range">
+            <input id="startDate" type="date" aria-label="开始日期">
+            <em>至</em>
+            <input id="endDate" type="date" aria-label="结束日期">
+          </div>
+        </label>
+        <label class="filter-field">
+          <span>版本</span>
+          <select id="versionFilter"><option value="">全部版本</option></select>
+        </label>
+        <label class="filter-field module-filter">
+          <span>功能模块</span>
+          <select id="moduleFilter"><option value="">全部模块</option></select>
+        </label>
+        <div class="filter-summary">
+          <span>当前范围</span>
+          <strong id="rangePrCount">0</strong>
+          <em>个 PR</em>
+        </div>
+      </section>
+
+      <section class="metric-grid overview-only" aria-label="支持状态统计">
+        <button class="metric-card native" data-card-status="NATIVE_SUPPORTED" type="button">
+          <div class="metric-top">
+            <span class="metric-icon">✓</span>
+            <span class="metric-share" id="nativeShare">0%</span>
+          </div>
+          <div class="metric-value" id="nativeCount">0</div>
+          <div class="metric-label">原生支持</div>
+          <div class="metric-note"><span></span>NPU 首次运行成功</div>
+        </button>
+        <button class="metric-card unsupported" data-card-status="NATIVE_UNSUPPORTED" type="button">
+          <div class="metric-top">
+            <span class="metric-icon">×</span>
+            <span class="metric-share" id="unsupportedShare">0%</span>
+          </div>
+          <div class="metric-value" id="unsupportedCount">0</div>
+          <div class="metric-label">原生不支持</div>
+          <div class="metric-note"><span></span>NPU 最新运行错误</div>
+        </button>
+        <button class="metric-card adapted" data-card-status="ADAPTED_SUPPORTED" type="button">
+          <div class="metric-top">
+            <span class="metric-icon">↗</span>
+            <span class="metric-share" id="adaptedShare">0%</span>
+          </div>
+          <div class="metric-value" id="adaptedCount">0</div>
+          <div class="metric-label">修改后支持</div>
+          <div class="metric-note"><span></span>torch-npu 修改后运行成功</div>
+        </button>
+        <button class="metric-card pending" data-card-status="PENDING_VERIFICATION" type="button">
+          <div class="metric-top">
+            <span class="metric-icon">···</span>
+            <span class="metric-share" id="pendingShare">0%</span>
+          </div>
+          <div class="metric-value" id="pendingCount">0</div>
+          <div class="metric-label">待确定</div>
+          <div class="metric-note"><span></span>暂无 NPU 验证结果</div>
+        </button>
+      </section>
+
+      <section class="insight-grid overview-only">
+        <article class="panel trend-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Master 跟随趋势</h2>
+              <p>按合入时间统计各周 PR 当前支持状态</p>
+            </div>
+            <div class="legend" aria-label="图例">
+              <span><i class="native-dot"></i>原生支持</span>
+              <span><i class="unsupported-dot"></i>原生不支持</span>
+              <span><i class="adapted-dot"></i>修改后支持</span>
+              <span><i class="pending-dot"></i>待确定</span>
+            </div>
+          </div>
+          <div id="trendChart" class="trend-chart" role="img" aria-label="PR 支持状态周趋势图"></div>
+        </article>
+
+        <article class="panel distribution-panel">
+          <div class="panel-header">
+            <div>
+              <h2>支持分布</h2>
+              <p>当前统计范围</p>
+            </div>
+          </div>
+          <div class="distribution-body">
+            <div id="donutChart" class="donut-chart" aria-label="支持状态占比">
+              <div class="donut-center"><strong id="donutTotal">0</strong><span>PR 总数</span></div>
+            </div>
+            <div class="distribution-list" id="distributionList"></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel ledger-panel" id="prLedger" hidden>
+        <div class="ledger-header">
+          <div>
+            <h2 id="ledgerTitle">全部 PR</h2>
+            <p>点击一条记录查看 AI 分析与 NPU 验证详情</p>
+          </div>
+          <div class="ledger-tools">
+            <div class="search-box">
+              <span>⌕</span>
+              <input id="searchInput" type="search" placeholder="搜索 PR、标题或模块">
+            </div>
+            <select id="statusFilter" aria-label="状态筛选">
+              <option value="">全部状态</option>
+              <option value="NATIVE_SUPPORTED">原生支持</option>
+              <option value="NATIVE_UNSUPPORTED">原生不支持</option>
+              <option value="ADAPTED_SUPPORTED">修改后支持</option>
+              <option value="PENDING_VERIFICATION">待确定</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>PR</th>
+                <th>合入时间</th>
+                <th>功能模块</th>
+                <th>影响标签</th>
+                <th>支持状态</th>
+                <th>NPU 验证</th>
+                <th>优先级</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="prTableBody"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state" hidden>
+            <div>⌕</div><strong>没有匹配的 PR</strong><span>调整时间或筛选条件后重试</span>
+          </div>
+        </div>
+        <div class="table-footer">
+          <span id="tableRange">显示 0 条</span>
+          <div class="pagination">
+            <button id="prevPage" type="button" aria-label="上一页">‹</button>
+            <span id="pageInfo">1 / 1</span>
+            <button id="nextPage" type="button" aria-label="下一页">›</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+  <aside id="detailDrawer" class="detail-drawer" aria-hidden="true">
+    <div class="drawer-header">
+      <div>
+        <span class="drawer-kicker">PR SUPPORT RECORD</span>
+        <h2 id="drawerPr">PR #—</h2>
+      </div>
+      <button id="closeDrawer" type="button" aria-label="关闭详情">×</button>
+    </div>
+    <div id="drawerContent" class="drawer-content"></div>
+  </aside>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

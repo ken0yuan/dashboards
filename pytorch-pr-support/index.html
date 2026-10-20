@@ -166,6 +166,15 @@
         </article>
       </section>
 
+      <section class="panel test-overview-panel overview-only" aria-label="测试结果统计">
+        <div class="panel-header">
+          <div><h2>测试结果</h2><p>当前筛选范围内各 PR 的测试执行状态</p></div>
+          <button class="ghost-button" type="button" data-view="all">查看 PR 测试详情 →</button>
+        </div>
+        <div id="testOverview" class="test-overview-grid"></div>
+        <p class="test-overview-note">已选测试通过仅表示本次覆盖的用例通过；支持状态以独立支持结论为准。</p>
+      </section>
+
       <section class="panel ledger-panel" id="prLedger" hidden>
         <div class="ledger-header">
           <div>
@@ -195,7 +204,7 @@
                 <th>功能模块</th>
                 <th>影响标签</th>
                 <th>支持状态</th>
-                <th>NPU 验证</th>
+                <th>测试结果</th>
                 <th>优先级</th>
                 <th></th>
               </tr>

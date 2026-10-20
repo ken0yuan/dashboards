@@ -12,7 +12,11 @@
     PENDING_VERIFICATION: { label: "待确定", color: "#e9a33a", css: "status-pending" }
   };
   const STATUS_ORDER = Object.keys(STATUS);
-  const MODULE_ORDER = ["Core and API", "分布式", "图模式", "社区生态"];
+  const MODULE_ORDER = [
+    "基础框架·API适配", "基础框架·运行时", "基础框架·taskqueue", "基础框架·Tensor支持", "基础框架·DFX",
+    "图模式·aclgraph后端", "图模式·inductor+triton", "分布式·FSDP/Shard/DTensor",
+    "分布式·Pipeline/Checkpoint/通信库", "社区生态"
+  ];
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -94,7 +98,7 @@
 
     const versions = [...new Set(records.map(r => r.version).filter(Boolean))].sort((a, b) => b.localeCompare(a, "zh-CN", { numeric: true }));
     const availableModules = new Set(records.map(r => r.module).filter(Boolean));
-    const modules = MODULE_ORDER.filter(module => availableModules.has(module));
+    const modules = [...MODULE_ORDER, ...[...availableModules].filter(module => !MODULE_ORDER.includes(module)).sort()];
     $("versionFilter").insertAdjacentHTML("beforeend", versions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""));
     $("moduleFilter").insertAdjacentHTML("beforeend", modules.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join(""));
 
@@ -211,9 +215,85 @@
   }
 
   function ciMarkup(record) {
-    if (record.ci_status === "是") return `<span class="ci-pill ci-success">验证通过</span>`;
-    if (record.ci_status === "否") return `<span class="ci-pill ci-failure">验证失败</span>`;
+    const status = record.ci_execution_status;
+    if (status && status !== "未记录") {
+      const css = status === "已选测试通过" ? "ci-success" : status === "已执行·有失败" ? "ci-failure" : "ci-empty";
+      return `<span class="ci-pill ${css}">${escapeHtml(status)}</span>`;
+    }
+    if (record.ci_status === "是") return `<span class="ci-pill ci-success">已选测试通过</span>`;
+    if (record.ci_status === "否") return `<span class="ci-pill ci-failure">已执行·有失败</span>`;
     return `<span class="ci-pill ci-empty">暂无结果</span>`;
+  }
+
+  function countMarkup(record, compact = false) {
+    const counts = record.ci_counts;
+    if (!counts || typeof counts !== "object") return "";
+    const fields = compact ? [["passed", "过"], ["failed", "败"], ["error", "错"], ["skipped", "跳"], ["no_result", "无结果"]]
+      : [["total", "报告 Total"], ["passed", "通过"], ["failed", "失败"], ["error", "错误"], ["skipped", "跳过"], ["no_result", "无结果"]];
+    return fields.filter(([key]) => Number.isInteger(counts[key]) && counts[key] >= 0).map(([key, label]) => compact
+      ? `${label} ${counts[key]}`
+      : `<div class="test-count"><span>${label}</span><strong>${counts[key]}</strong></div>`).join(compact ? " · " : "");
+  }
+
+  function reportLink(url, label) {
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return "";
+    return `<a class="detail-link" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)} ↗</a>`;
+  }
+
+  function testText(value) {
+    if (value == null || value === "") return "无结果";
+    return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
+  }
+
+  function renderTestSection(record) {
+    const analysis = record.ci_analysis && typeof record.ci_analysis === "object" ? record.ci_analysis : null;
+    const comparisons = Array.isArray(record.ci_test_comparisons) ? record.ci_test_comparisons : [];
+    const cases = analysis && Array.isArray(analysis.cases) ? analysis.cases : [];
+    const sources = Array.isArray(record.ci_sources) ? record.ci_sources : [];
+    const caseIndex = new Map(comparisons.map(item => [String(item.item_id), item]));
+    const resultRows = comparisons.length ? comparisons : (Array.isArray(record.ci_test_items) ? record.ci_test_items : []);
+    const results = resultRows.map(item => `<tr>
+      <td><strong>${escapeHtml(item.name || item.item_id || "未命名用例")}</strong><small>${escapeHtml(item.file || "")}</small></td>
+      <td>${escapeHtml(item.device || "未记录")}</td>
+      <td>${escapeHtml(item.baseline_absent ? "基线无记录" : testText(item.baseline_result))}</td>
+      <td>${escapeHtml(testText(item.current_result ?? item.result))}</td>
+    </tr>`).join("");
+    const fields = [["observation", "前后观测"], ["failure_location", "失败位置"], ["reused_analysis", "复用分析"],
+      ["pr_error_coupling", "PR 与报错的关联"], ["npu_coupling", "torch-npu 关联"], ["mechanism", "机制分析"],
+      ["conclusion", "用例结论"], ["evidence_gaps", "证据缺口"], ["action", "后续动作"]];
+    const caseMarkup = cases.map(item => {
+      const observation = caseIndex.get(String(item.item_id)) || {};
+      return `<details class="test-case"><summary>${escapeHtml(observation.name || item.item_id || "用例分析")}<span>${escapeHtml(item.change || "")}</span></summary>
+        ${item.relation_status ? `<p class="test-relation">${escapeHtml(item.relation_status)}</p>` : ""}
+        ${fields.filter(([key]) => item[key]).map(([key, label]) => `<div class="case-field"><h4>${label}</h4><p>${escapeHtml(testText(item[key]))}</p></div>`).join("")}
+        ${Array.isArray(item.evidence) && item.evidence.length ? `<div class="case-field"><h4>证据</h4><ul>${item.evidence.map(entry => `<li>${escapeHtml(testText(entry))}</li>`).join("")}</ul></div>` : ""}
+      </details>`;
+    }).join("");
+    const legacy = !analysis && record.ci_error_reason ? record.ci_error_reason : "";
+    const links = new Map();
+    if (record.ci_run_url) links.set(record.ci_run_url, "查看测试报告");
+    sources.forEach(source => { if (source.url) links.set(source.url, source.title || "查看测试报告"); });
+    const counts = countMarkup(record);
+    return `<section class="detail-section test-section"><h3>测试结果与分析</h3>
+      <div class="test-status">${ciMarkup(record)}<span>报告来源：${escapeHtml(record.ci_source_status || "未记录")}</span></div>
+      ${counts ? `<div class="test-counts">${counts}</div><p class="test-note">计数按报告原文展示；Total 与参数化用例计数可能粒度不同。已选测试通过仅表示本次覆盖的用例结果。</p>` : ""}
+      ${analysis && analysis.summary ? `<div class="case-field"><h4>测试分析</h4><p>${escapeHtml(testText(analysis.summary))}</p></div>` : legacy ? `<div class="case-field"><h4>历史测试分析</h4><p>${escapeHtml(legacy)}</p></div>` : `<p class="test-note">${resultRows.length ? "已有测试观测，暂无测试分析。" : "暂无用例结果；不据此判断测试是否执行或通过。"}</p>`}
+      ${analysis && analysis.evidence_gaps ? `<div class="case-field"><h4>证据缺口</h4><p>${escapeHtml(testText(analysis.evidence_gaps))}</p></div>` : ""}
+      ${results ? `<div class="test-results"><table><thead><tr><th>测试用例</th><th>设备</th><th>PR 前</th><th>本次结果</th></tr></thead><tbody>${results}</tbody></table></div>` : ""}
+      ${caseMarkup ? `<h4 class="case-heading">逐用例分析（${cases.length}）</h4>${caseMarkup}` : ""}
+      ${record.ci_env ? `<div class="case-field"><h4>测试环境</h4><p>${escapeHtml(record.ci_env)}</p></div>` : ""}
+      <div class="report-links">${[...links].map(([url, label]) => reportLink(url, label)).join("")}</div>
+    </section>`;
+  }
+
+  function renderTestOverview(rows) {
+    const labels = ["已选测试通过", "已执行·有失败", "部分无结果", "全部跳过", "无有效结果", "未获取结果", "未记录"];
+    const counts = Object.fromEntries(labels.map(label => [label, 0]));
+    rows.forEach(record => {
+      const label = labels.includes(record.ci_execution_status) ? record.ci_execution_status : "未记录";
+      counts[label] += 1;
+    });
+    $("testOverview").innerHTML = labels.map(label => `<div class="test-count"><span>${label}</span><strong>${counts[label].toLocaleString("zh-CN")}</strong></div>`).join("");
   }
 
   function renderTable(rows) {
@@ -230,7 +310,7 @@
         <td><span class="module-pill">${escapeHtml(r.module || "未分类")}</span></td>
         <td><span class="impact-pill">${escapeHtml(r.impact_tag || "—")}</span></td>
         <td><span class="status-pill ${STATUS[r.status].css}">${STATUS[r.status].label}</span></td>
-        <td>${ciMarkup(r)}</td>
+        <td>${ciMarkup(r)}${countMarkup(r, true) ? `<small class="test-count-summary">${countMarkup(r, true)}</small>` : ""}</td>
         <td><span class="priority-pill priority-${priority}">${priorityLabel}</span></td>
         <td><span class="row-arrow">›</span></td>
       </tr>`;
@@ -261,16 +341,14 @@
         <div class="detail-stat"><span>目标版本</span><strong>${escapeHtml(r.version || "待定")}</strong></div>
         <div class="detail-stat"><span>是否需要适配</span><strong>${escapeHtml(r.need_adaptation || "待确认")}</strong></div>
         <div class="detail-stat"><span>是否需要验证</span><strong>${escapeHtml(r.need_verification || "待确认")}</strong></div>
-        <div class="detail-stat"><span>NPU CI</span><strong>${r.ci_status === "是" ? "通过" : r.ci_status === "否" ? "失败" : "暂无结果"}</strong></div>
+        <div class="detail-stat"><span>测试执行</span><strong>${ciMarkup(r)}</strong></div>
         <div class="detail-stat"><span>CANN 依赖</span><strong>${escapeHtml(r.cann_dependency || "未评估")}</strong></div>
       </div>
       <section class="detail-section"><h3>AI 摘要</h3><p>${escapeHtml(r.summary || "暂无摘要")}</p></section>
       <section class="detail-section"><h3>影响分析</h3><p>${escapeHtml(r.impact_analysis || "暂无影响分析")}</p></section>
-      ${r.ci_error_reason ? `<section class="detail-section"><h3>验证失败原因</h3><p>${escapeHtml(r.ci_error_reason)}</p></section>` : ""}
-      ${r.ci_env ? `<section class="detail-section"><h3>验证环境</h3><p>${escapeHtml(r.ci_env)}</p></section>` : ""}
+      ${renderTestSection(r)}
       <section class="detail-section"><h3>数据来源</h3><p>${escapeHtml(r.source_file || "归档库")}</p>
-        ${r.pr_url ? `<a class="detail-link" href="${escapeHtml(r.pr_url)}" target="_blank" rel="noopener">打开 PyTorch PR ↗</a>` : ""}
-        ${r.ci_run_url ? `<a class="detail-link" href="${escapeHtml(r.ci_run_url)}" target="_blank" rel="noopener" style="margin-left:7px">查看 NPU CI ↗</a>` : ""}
+        ${reportLink(r.pr_url, "打开 PyTorch PR")}
       </section>`;
     $("drawerBackdrop").hidden = false;
     $("detailDrawer").classList.add("open");
@@ -345,6 +423,7 @@
     if (state.view === "overview") {
       renderTrend(rangeRows);
       renderDistribution(counts, rangeRows.length);
+      renderTestOverview(rangeRows);
     } else {
       renderTable(getTableRecords(rangeRows));
     }
